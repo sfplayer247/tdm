@@ -225,7 +225,6 @@ void makeBox(int x, int y, int width, int height, int xPadding, int yPadding, ch
   putgchar(106);
 }
 
-
 int main() {
   // Reset screen and setup term mode
   struct termios oldt = setupTermMode();
@@ -306,6 +305,14 @@ int main() {
       fflush(stdout);
     }
   }
+  for (int i = 0; i<numOptions; i++) {
+    free(options[i]);
+    free(execs[i]);
+  }
+  free(options);
+  free(execs);
+  vtCode("[?25h");
+  cleanKV(&config);
   setGraphicsMode(0);
   cleanupTermMode(oldt);
   vtCode(VTResetScreen);
