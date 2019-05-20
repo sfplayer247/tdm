@@ -19,6 +19,9 @@
 #define RightArrow 2
 #define LeftArrow 3
 
+#define vtCursorXY(X, Y) (printf("\e[%d;%df", Y, X))
+#define putgchar(C) (printf("%c%c%c", EnterGraphicsMode, C, ExitGraphicsMode))
+
 // Config File Reader
 typedef struct KVPair {
   char* key;
@@ -88,18 +91,13 @@ int nextPair(KVPair* pair) {
   
   char* key = stripstr(strtok(line, "="), 0, ' ');
   char* val = stripstr(strtok(NULL, ""), 1, ' ');
-  size_t keysize = strlen(key) + 1;
-  size_t valsize = strlen(val) + 1;
+  size_t keysize = strlen(key) + 1, valsize = strlen(val) + 1;
 
   // Allocate more memory if the structure members are not large enough
-  if (pair->keysize < keysize) {
-    pair->key = realloc(pair->key, keysize);
-    pair->keysize = keysize;
-  }
-  if (pair->valsize < valsize) {
-    pair->val = realloc(pair->val, valsize);
-    pair->valsize = valsize;
-  }
+  if (pair->keysize < keysize) 
+    pair->keysize = keysize, pair->key = realloc(pair->key, keysize);
+  if (pair->valsize < valsize)
+    pair->valsize = valsize, pair->val = realloc(pair->val, valsize);
 
   strcpy(pair->key, key);
   strcpy(pair->val, val);
@@ -135,100 +133,37 @@ key getkey() {
   return (key){0, k};
 }
 
-struct termios setupTermMode() {
+// Graphics Functions
+void drawLine(int x, int y, int length, int vertical, int fCorner, int bCorner) {
+  vtCursorXY(x, y);
+  putgchar(fCorner);
+  for (int i=0; i<length; i++) {
+    vertical ? y++ : x++;
+    vtCursorXY(x, y);
+    putgchar(vertical ? 120 : 113);
+  }
+  vtCursorXY(x, y);
+  putgchar(bCorner);
+}
+
+void makeBox(int x, int y, int width, int height, int xPadding, int yPadding) {
+  x -= xPadding, y -= yPadding;
+  width += xPadding*2, height += yPadding*2+1;
+  drawLine(x, y, width, 0, 108, 107); 
+  drawLine(x+width, y, height, 1, 107, 106);
+  drawLine(x, y, height, 1, 108, 109);
+  drawLine(x, y+height, width, 0, 109, 106);
+}
+
+int main() {
+  // Reset screen and setup term mode
   struct termios oldt, newt;
   
   tcgetattr ( STDIN_FILENO, &oldt );
   newt = oldt;
   newt.c_lflag &= ~( ICANON | ECHO );
   tcsetattr ( STDIN_FILENO, TCSANOW, &newt );
-  
-  return oldt;
-}
-
-void cleanupTermMode(struct termios oldt) {
-  tcsetattr ( STDIN_FILENO, TCSANOW, &oldt );
-}
-// Graphics Functions
-int graphicsMode = 0;
-
-int setGraphicsMode(int state) {
-  if (graphicsMode == state)
-    return state;
-  if (state == 0) 
-    putchar(ExitGraphicsMode);
-  else
-    putchar(EnterGraphicsMode);
-  
-  int oldstate = graphicsMode;
-  graphicsMode = state;
-  return oldstate;
-}
-
-
-void vtCode(char* action) {	
-  int gstate = setGraphicsMode(0);
-  printf("\e%s", action);
-  setGraphicsMode(gstate);
-}
-
-
-void vtCursorXY(int x, int y) {
-  int gstate = setGraphicsMode(0);
-  printf("\e[%d;%df", y, x);
-  setGraphicsMode(gstate);
-}
-
-// Put graphical char
-void putgchar(int code) {
-  setGraphicsMode(1);
-  putchar(code);
-}
-
-void makeBox(int x, int y, int width, int height, int xPadding, int yPadding, char* windowTitle) {
-  x -= xPadding;
-  y -= yPadding;
-  width += xPadding*2;
-  height += yPadding*2;
-  vtCursorXY(x, y);
-  // Top left corner of box
-  putgchar(108);
-  // Top line
-  putgchar(113);
-  setGraphicsMode(0);
-  printf(windowTitle);
-  int titleLen = strlen(windowTitle);
-  for (int i=0; i<width-1-titleLen; i++)
-    putgchar(113);
-  // Top right corner of box
-  putgchar(107);
-  // Right side of box
-  for (int i=0; i<height; i++) {
-    vtCode(VTCursorDown);
-    vtCode(VTCursorLeft);
-    putgchar(120);
-  }
-  // Left side of box
-  vtCursorXY(x+1,y);
-  for (int i=0; i<height; i++) {
-    vtCode(VTCursorDown);
-    vtCode(VTCursorLeft);
-    putgchar(120);
-  }
-  // Bottom left corner of box
-  vtCode(VTCursorDown);
-  vtCode(VTCursorLeft);
-  putgchar(109);
-  // Bottom side of box
-  for (int i=0; i<width; i++)
-    putgchar(113);
-  putgchar(106);
-}
-
-int main() {
-  // Reset screen and setup term mode
-  struct termios oldt = setupTermMode();
-  vtCode(VTResetScreen);
+  printf("\e%s", VTResetScreen);
 
   // Load config file and draw menu
   int selected = 0;
@@ -240,11 +175,7 @@ int main() {
   char** execs = malloc(1);
   KVPair config = loadConfig();
   while(nextPair(&config)) {
-    if (strcmp(config.key, "padding") == 0) {
-      xPadding = atoi(config.val);
-      yPadding = xPadding;
-    }
-    else if (strcmp(config.key, "xpadding") == 0)
+    if (strcmp(config.key, "xpadding") == 0)
       xPadding = atoi(config.val);
     else if (strcmp(config.key, "ypadding") == 0)
       yPadding = atoi(config.val);
@@ -264,25 +195,21 @@ int main() {
   ioctl(0, TIOCGWINSZ, &win); 
   int boxX = (win.ws_col-boxWidth-2)/2;
   int boxY = (win.ws_row-boxHeight-2)/2;
-  makeBox(boxX, boxY, boxWidth+2, boxHeight, xPadding, yPadding, "Login");
-  setGraphicsMode(0);
+  makeBox(boxX, boxY, boxWidth+2, boxHeight, xPadding, yPadding);
   // Draw each option inside the box
   for (int i; i<numOptions; i++) {
     vtCursorXY(boxX+1,boxY+1+i);
-    if (selected == i) {
+    if (selected == i)
       putgchar(96);
-      setGraphicsMode(0);
-    }
     else
       putchar(' ');
     printf(" %s", options[i]);
   }
-  fflush(stdout);
   // Hide Cursor
-  vtCode("[?25l");
+  printf("\e%s", "[?25l");
   fflush(stdout);
   key k;
-  while(1) {
+  for (;;) {
     k = getkey();
     if (k.code == 'q')
       break;
@@ -311,11 +238,11 @@ int main() {
   }
   free(options);
   free(execs);
-  vtCode("[?25h");
+  printf("\e%s", "[?25h");
+
   cleanKV(&config);
-  setGraphicsMode(0);
-  cleanupTermMode(oldt);
-  vtCode(VTResetScreen);
+  tcsetattr ( STDIN_FILENO, TCSANOW, &oldt );
+  printf("\e%s", VTResetScreen);
   fflush(stdout);
   return 0;
 }
